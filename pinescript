@@ -1,0 +1,105 @@
+//@version=5
+strategy("Bollinger Band EMA Strategy", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=0)
+
+// Input parameters
+bb_length = input.int(20, title="Bollinger Band Length", minval=1)
+bb_mult = input.float(2.0, title="Bollinger Band Multiplier", minval=0.1, step=0.1)
+ema_length = input.int(50, title="EMA Length", minval=1)
+atr_length = input.int(14, title="ATR Length", minval=1)
+atr_mult = input.float(1.5, title="ATR Multiplier for Stop Loss", minval=0.1, step=0.1)
+
+// Calculate indicators
+ema50 = ta.ema(close, ema_length)
+basis = ta.sma(close, bb_length)
+dev = bb_mult * ta.stdev(close, bb_length)
+upper_bb = basis + dev
+lower_bb = basis - dev
+atr = ta.atr(atr_length)
+
+// Plot indicators
+plot(ema50, color=color.blue, title="EMA 50", linewidth=2)
+plot(upper_bb, color=color.red, title="Upper BB")
+plot(basis, color=color.orange, title="Middle BB")
+plot(lower_bb, color=color.green, title="Lower BB")
+
+// Fill Bollinger Bands
+fill(plot(upper_bb), plot(lower_bb), color=color.new(color.gray, 90), title="BB Fill")
+
+// Buy Setup Conditions
+buy_condition1 = close < ema50
+buy_condition2 = close < lower_bb
+buy_condition3 = close > lower_bb and close < basis
+buy_condition3_prev = close[1] <= lower_bb[1]
+
+// Check if current candle closed above lower BB but previous was below/at lower BB
+buy_setup = buy_condition1 and buy_condition2[1] and buy_condition3 and buy_condition3_prev
+
+// Sell Setup Conditions
+sell_condition1 = close > ema50
+sell_condition2 = close > upper_bb
+sell_condition3 = close < upper_bb and close > basis
+sell_condition3_prev = close[1] >= upper_bb[1]
+
+// Check if current candle closed below upper BB but previous was above/at upper BB
+sell_setup = sell_condition1 and sell_condition2[1] and sell_condition3 and sell_condition3_prev
+
+// Variables to track entry signals
+var float buy_entry_price = na
+var float sell_entry_price = na
+var float buy_stop_loss = na
+var float sell_stop_loss = na
+
+// Entry logic
+if buy_setup and strategy.position_size == 0
+    buy_entry_price := open[1]  // Next candle open (current candle)
+    buy_stop_loss := close - (atr * atr_mult)  // 1.5 ATR below entry
+    strategy.entry("Buy", strategy.long, stop=buy_entry_price)
+
+if sell_setup and strategy.position_size == 0
+    sell_entry_price := open[1]  // Next candle open (current candle)
+    sell_stop_loss := close + (atr * atr_mult)  // 1.5 ATR above entry
+    strategy.entry("Sell", strategy.short, stop=sell_entry_price)
+
+// Exit conditions
+// Buy exit: price closes above middle BB
+if strategy.position_size > 0 and close > basis
+    strategy.close("Buy", comment="TP: Above Middle BB")
+
+// Sell exit: price closes below middle BB
+if strategy.position_size < 0 and close < basis
+    strategy.close("Sell", comment="TP: Below Middle BB")
+
+// Stop loss orders
+if strategy.position_size > 0
+    strategy.exit("Buy SL", "Buy", stop=buy_stop_loss)
+
+if strategy.position_size < 0
+    strategy.exit("Sell SL", "Sell", stop=sell_stop_loss)
+
+// Plot buy/sell signals
+plotshape(buy_setup, style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, title="Buy Signal")
+plotshape(sell_setup, style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, title="Sell Signal")
+
+// Plot stop loss levels
+plot(strategy.position_size > 0 ? buy_stop_loss : na, color=color.red, style=plot.style_linebr, linewidth=1, title="Buy Stop Loss")
+plot(strategy.position_size < 0 ? sell_stop_loss : na, color=color.red, style=plot.style_linebr, linewidth=1, title="Sell Stop Loss")
+
+// Alert conditions
+alertcondition(buy_setup, title="Buy Setup", message="Buy setup detected: Price below EMA50, candle closed above lower BB")
+alertcondition(sell_setup, title="Sell Setup", message="Sell setup detected: Price above EMA50, candle closed below upper BB")
+
+// Table to display current conditions
+if barstate.islast
+    var table info_table = table.new(position.top_right, 2, 6, bgcolor=color.white, border_width=1)
+    table.cell(info_table, 0, 0, "Condition", text_color=color.black, bgcolor=color.gray)
+    table.cell(info_table, 1, 0, "Status", text_color=color.black, bgcolor=color.gray)
+    table.cell(info_table, 0, 1, "Price vs EMA50", text_color=color.black)
+    table.cell(info_table, 1, 1, close > ema50 ? "Above" : "Below", text_color=close > ema50 ? color.green : color.red)
+    table.cell(info_table, 0, 2, "Price vs Upper BB", text_color=color.black)
+    table.cell(info_table, 1, 2, close > upper_bb ? "Above" : "Below", text_color=close > upper_bb ? color.green : color.red)
+    table.cell(info_table, 0, 3, "Price vs Lower BB", text_color=color.black)
+    table.cell(info_table, 1, 3, close < lower_bb ? "Below" : "Above", text_color=close < lower_bb ? color.red : color.green)
+    table.cell(info_table, 0, 4, "Buy Setup", text_color=color.black)
+    table.cell(info_table, 1, 4, buy_setup ? "Active" : "Inactive", text_color=buy_setup ? color.green : color.gray)
+    table.cell(info_table, 0, 5, "Sell Setup", text_color=color.black)
+    table.cell(info_table, 1, 5, sell_setup ? "Active" : "Inactive", text_color=sell_setup ? color.green : color.gray)
